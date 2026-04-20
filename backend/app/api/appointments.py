@@ -6,14 +6,14 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ..demo_data import APPOINTMENTS, CLIENTS, SERVICE_TYPES
 from ..models import AppointmentCreate, AppointmentUpdate
+from ..store import load, save
 
 router = APIRouter(prefix="/api/appointments", tags=["appointments"])
 
 
-def _find_service(name: str):
-    return next((s for s in SERVICE_TYPES if s["name"] == name), None)
+def _find_service(service_types: list, name: str):
+    return next((s for s in service_types if s["name"] == name), None)
 
 
 @router.get("/calendar")
@@ -21,6 +21,9 @@ def get_calendar(
     start_date: Optional[str] = Query(None),
 ):
     """Return appointments grouped by day for a week view."""
+    data = load()
+    appointments = data.get("appointments", [])
+
     if start_date:
         start = date.fromisoformat(start_date)
     else:
@@ -30,7 +33,7 @@ def get_calendar(
     end = start + timedelta(days=6)
 
     week_apts = [
-        a for a in APPOINTMENTS
+        a for a in appointments
         if start.isoformat() <= a["date"] <= end.isoformat()
     ]
     week_apts.sort(key=lambda a: (a["date"], a["time"]))
@@ -52,7 +55,8 @@ def list_appointments(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
 ):
-    results = list(APPOINTMENTS)
+    data = load()
+    results = list(data.get("appointments", []))
 
     if status:
         results = [a for a in results if a["status"] == status]
@@ -69,49 +73,57 @@ def list_appointments(
 
 @router.get("/{appointment_id}")
 def get_appointment(appointment_id: str):
-    apt = next((a for a in APPOINTMENTS if a["id"] == appointment_id), None)
+    data = load()
+    apt = next((a for a in data.get("appointments", []) if a["id"] == appointment_id), None)
     if not apt:
         raise HTTPException(status_code=404, detail="Appointment not found")
     return apt
 
 
 @router.post("", status_code=201)
-def create_appointment(data: AppointmentCreate):
-    client = next((c for c in CLIENTS if c["id"] == data.client_id), None)
+def create_appointment(data_in: AppointmentCreate):
+    data = load()
+    clients = data.get("clients", [])
+    service_types = data.get("service_types", [])
+
+    client = next((c for c in clients if c["id"] == data_in.client_id), None)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    service = _find_service(data.service_type)
+    service = _find_service(service_types, data_in.service_type)
     if not service:
         raise HTTPException(status_code=400, detail="Invalid service type")
 
     new_apt = {
         "id": f"apt-{uuid.uuid4().hex[:6]}",
-        "client_id": data.client_id,
+        "client_id": data_in.client_id,
         "client_name": f"{client['first_name']} {client['last_name']}",
         "service_type": service["name"],
         "service_category": service["category"],
-        "date": data.date,
-        "time": data.time,
+        "date": data_in.date,
+        "time": data_in.time,
         "duration_minutes": service["duration_minutes"],
         "status": "scheduled",
         "price": service["price"],
-        "notes": data.notes,
+        "notes": data_in.notes,
         "practitioner": "Dr. Sarah Chen",
     }
-    APPOINTMENTS.append(new_apt)
+    data.setdefault("appointments", []).append(new_apt)
+    save(data)
     return new_apt
 
 
 @router.patch("/{appointment_id}")
-def update_appointment(appointment_id: str, data: AppointmentUpdate):
-    apt = next((a for a in APPOINTMENTS if a["id"] == appointment_id), None)
+def update_appointment(appointment_id: str, data_in: AppointmentUpdate):
+    data = load()
+    apt = next((a for a in data.get("appointments", []) if a["id"] == appointment_id), None)
     if not apt:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
-    updates = data.model_dump(exclude_unset=True)
+    updates = data_in.model_dump(exclude_unset=True)
     for key, value in updates.items():
         if value is not None:
             apt[key] = value if not hasattr(value, "value") else value.value
 
+    save(data)
     return apt

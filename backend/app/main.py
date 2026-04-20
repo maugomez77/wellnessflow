@@ -1,15 +1,27 @@
 """WellnessFlow API — Practice management for wellness practitioners."""
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api import appointments, clients, compliance, dashboard, insurance, treatments
-from .demo_data import SERVICE_TYPES
+from .database import init_db
+from .store import load, seed_if_empty
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    seed_if_empty()
+    yield
+
 
 app = FastAPI(
     title="WellnessFlow API",
     description="Practice management platform for independent wellness practitioners",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS — allow frontend origins
@@ -42,4 +54,4 @@ def health_check():
 
 @app.get("/api/services")
 def list_services():
-    return SERVICE_TYPES
+    return load().get("service_types", [])

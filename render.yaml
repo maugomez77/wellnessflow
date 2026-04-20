@@ -9,3 +9,5 @@ services:
     envVars:
       - key: FRONTEND_URL
         value: https://wellnessflow-app.vercel.app
+      - key: DATABASE_URL
+        sync: false

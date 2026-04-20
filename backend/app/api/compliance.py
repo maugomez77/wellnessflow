@@ -2,14 +2,15 @@
 
 from fastapi import APIRouter
 
-from ..demo_data import COMPLIANCE_ITEMS
+from ..store import load
 
 router = APIRouter(prefix="/api/compliance", tags=["compliance"])
 
 
 @router.get("")
 def list_compliance():
-    items = sorted(COMPLIANCE_ITEMS, key=lambda c: c["expiry_date"])
+    data = load()
+    items = sorted(data.get("compliance_items", []), key=lambda c: c["expiry_date"])
 
     # Summary
     current = sum(1 for c in items if c["status"] == "current")

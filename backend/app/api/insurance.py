@@ -5,28 +5,31 @@ from datetime import date
 
 from fastapi import APIRouter, HTTPException
 
-from ..demo_data import APPOINTMENTS, CLIENTS, INSURANCE_CLAIMS
 from ..models import ClaimCreate
+from ..store import load, save
 
 router = APIRouter(prefix="/api/insurance", tags=["insurance"])
 
 
 @router.get("/claims")
 def list_claims(status: str | None = None):
-    results = list(INSURANCE_CLAIMS)
+    data = load()
+    claims = data.get("insurance_claims", [])
+
+    results = list(claims)
     if status:
         results = [c for c in results if c["status"] == status]
     results.sort(key=lambda c: c["submitted_date"], reverse=True)
 
     # Summary stats
-    total_submitted = sum(c["amount"] for c in INSURANCE_CLAIMS)
-    total_paid = sum(c.get("paid_amount", 0) or 0 for c in INSURANCE_CLAIMS)
+    total_submitted = sum(c["amount"] for c in claims)
+    total_paid = sum(c.get("paid_amount", 0) or 0 for c in claims)
     pending_count = sum(
-        1 for c in INSURANCE_CLAIMS if c["status"] in ("submitted", "under_review")
+        1 for c in claims if c["status"] in ("submitted", "under_review")
     )
-    paid_count = sum(1 for c in INSURANCE_CLAIMS if c["status"] == "paid")
-    denied_count = sum(1 for c in INSURANCE_CLAIMS if c["status"] == "denied")
-    approved_count = sum(1 for c in INSURANCE_CLAIMS if c["status"] == "approved")
+    paid_count = sum(1 for c in claims if c["status"] == "paid")
+    denied_count = sum(1 for c in claims if c["status"] == "denied")
+    approved_count = sum(1 for c in claims if c["status"] == "approved")
 
     return {
         "claims": results,
@@ -39,7 +42,7 @@ def list_claims(status: str | None = None):
             "approved_count": approved_count,
             "success_rate": round(
                 (paid_count + approved_count)
-                / max(len(INSURANCE_CLAIMS), 1)
+                / max(len(claims), 1)
                 * 100,
                 1,
             ),
@@ -49,19 +52,24 @@ def list_claims(status: str | None = None):
 
 @router.get("/claims/{claim_id}")
 def get_claim(claim_id: str):
-    claim = next((c for c in INSURANCE_CLAIMS if c["id"] == claim_id), None)
+    data = load()
+    claim = next((c for c in data.get("insurance_claims", []) if c["id"] == claim_id), None)
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
     return claim
 
 
 @router.post("/claims", status_code=201)
-def create_claim(data: ClaimCreate):
-    client = next((c for c in CLIENTS if c["id"] == data.client_id), None)
+def create_claim(data_in: ClaimCreate):
+    data = load()
+    clients = data.get("clients", [])
+    appointments = data.get("appointments", [])
+
+    client = next((c for c in clients if c["id"] == data_in.client_id), None)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    apt = next((a for a in APPOINTMENTS if a["id"] == data.appointment_id), None)
+    apt = next((a for a in appointments if a["id"] == data_in.appointment_id), None)
     if not apt:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
@@ -70,9 +78,9 @@ def create_claim(data: ClaimCreate):
 
     new_claim = {
         "id": f"clm-{uuid.uuid4().hex[:6]}",
-        "client_id": data.client_id,
+        "client_id": data_in.client_id,
         "client_name": f"{client['first_name']} {client['last_name']}",
-        "appointment_id": data.appointment_id,
+        "appointment_id": data_in.appointment_id,
         "service_type": apt["service_type"],
         "date_of_service": apt["date"],
         "amount": apt["price"],
@@ -80,5 +88,6 @@ def create_claim(data: ClaimCreate):
         "status": "submitted",
         "submitted_date": date.today().isoformat(),
     }
-    INSURANCE_CLAIMS.append(new_claim)
+    data.setdefault("insurance_claims", []).append(new_claim)
+    save(data)
     return new_claim
